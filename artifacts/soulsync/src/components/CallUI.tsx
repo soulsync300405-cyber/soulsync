@@ -123,6 +123,7 @@ export function CallUI({ type, companion, psychName, onEnd }: CallUIProps) {
   const aiCall = useAIVoiceCall(
     companion?.name || "Asha",
     companion?.voiceStyle,
+    companion?.language,
   );
 
   const duration = useDuration(phase === "active");
