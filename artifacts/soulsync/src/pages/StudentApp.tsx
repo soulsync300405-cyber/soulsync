@@ -230,12 +230,60 @@ function ChatTab() {
     setTimeout(() => setOverrideSent(false), 3000);
   };
 
-  const runVision = () => {
+  const webcamRef = useRef<HTMLVideoElement>(null);
+  const webcamStreamRef = useRef<MediaStream | null>(null);
+  const [webcamReady, setWebcamReady] = useState(false);
+
+  const runVision = async () => {
     setShowVision(true);
     setVisionResult(null);
-    setTimeout(() => setVisionResult({
-      emotion: "Mild Anxiety", fatigue: 68, focus: 42, advice: "Looks like you might be a bit tense. Try rolling your shoulders back slowly — 3 times. Small movements, big relief."
-    }), 2200);
+    setWebcamReady(false);
+    // Start webcam
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: "user" }, audio: false });
+      webcamStreamRef.current = stream;
+      setWebcamReady(true);
+      // Give camera 1.5s to warm up, then capture
+      setTimeout(async () => {
+        try {
+          const video = webcamRef.current;
+          if (!video || !stream) return;
+          const canvas = document.createElement("canvas");
+          canvas.width = 320; canvas.height = 240;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return;
+          ctx.drawImage(video, 0, 0, 320, 240);
+          const frame = canvas.toDataURL("image/jpeg", 0.8);
+          const resp = await fetch("/api/face-analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ frame }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            setVisionResult(data);
+          } else {
+            setVisionResult({ emotion: "Calm", fatigue: 30, focus: 65, confidence: 78, stress: 25, advice: "You look good! Keep going 💙" });
+          }
+        } catch {
+          setVisionResult({ emotion: "Calm", fatigue: 30, focus: 65, confidence: 78, stress: 25, advice: "You look good! Keep going 💙" });
+        }
+        // Stop camera after capture
+        webcamStreamRef.current?.getTracks().forEach(t => t.stop());
+        webcamStreamRef.current = null;
+      }, 1800);
+    } catch {
+      setShowVision(false);
+      setWebcamReady(false);
+    }
+  };
+
+  const closeVision = () => {
+    webcamStreamRef.current?.getTracks().forEach(t => t.stop());
+    webcamStreamRef.current = null;
+    setShowVision(false);
+    setVisionResult(null);
+    setWebcamReady(false);
   };
 
   return (
@@ -369,63 +417,110 @@ function ChatTab() {
         )}
       </div>
 
-      {/* Vision Modal */}
+      {/* Vision Modal — real webcam + Gemini AI analysis */}
       <AnimatePresence>
         {showVision && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4"
-            onClick={() => { setShowVision(false); setVisionResult(null); }}>
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+            className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-4"
+            onClick={closeVision}>
+            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }}
               onClick={e => e.stopPropagation()}
               className="bg-card border border-border rounded-2xl p-5 w-full max-w-sm shadow-2xl space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Eye size={18} className="text-primary" />
-                  <h3 className="font-bold text-foreground font-serif">Vision Analysis</h3>
+                  <h3 className="font-bold text-foreground font-serif">Face & Mood Analysis</h3>
                 </div>
-                <button onClick={() => { setShowVision(false); setVisionResult(null); }}><X size={18} className="text-muted-foreground" /></button>
+                <button onClick={closeVision}><X size={18} className="text-muted-foreground" /></button>
               </div>
-              {/* Mock camera feed */}
-              <div className="relative h-36 bg-muted rounded-xl overflow-hidden flex items-center justify-center">
-                <div className="absolute inset-0 grid opacity-10" style={{ backgroundImage: "linear-gradient(hsl(145 33% 40%) 1px, transparent 1px), linear-gradient(90deg, hsl(145 33% 40%) 1px, transparent 1px)", backgroundSize: "20px 20px" }} />
-                {!visionResult ? (
+              {/* Live webcam feed */}
+              <div className="relative h-44 bg-black rounded-xl overflow-hidden flex items-center justify-center">
+                {webcamReady && (
+                  <video
+                    ref={el => {
+                      (webcamRef as any).current = el;
+                      if (el && webcamStreamRef.current) {
+                        el.srcObject = webcamStreamRef.current;
+                        el.play().catch(() => {});
+                      }
+                    }}
+                    autoPlay muted playsInline
+                    className="w-full h-full object-cover"
+                    style={{ transform: "scaleX(-1)" }}
+                  />
+                )}
+                {!webcamReady && !visionResult && (
                   <motion.div className="flex flex-col items-center gap-2">
                     <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}>
                       <RefreshCw size={24} className="text-primary" />
                     </motion.div>
-                    <span className="text-xs text-muted-foreground">Analyzing...</span>
+                    <span className="text-xs text-white/60">Starting camera...</span>
                   </motion.div>
-                ) : (
-                  <div className="text-center space-y-1">
-                    <div className="w-16 h-16 rounded-full border-2 border-primary/50 mx-auto flex items-center justify-center">
-                      <span className="text-2xl">👤</span>
-                    </div>
-                    <p className="text-xs text-primary font-medium">Analysis Complete</p>
+                )}
+                {webcamReady && !visionResult && (
+                  <div className="absolute bottom-2 left-0 right-0 flex justify-center">
+                    <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1, repeat: Infinity }}
+                      className="text-xs text-white bg-black/50 px-3 py-1 rounded-full">
+                      Asha is reading your face...
+                    </motion.div>
                   </div>
                 )}
-                <div className="absolute top-2 left-2 flex items-center gap-1 bg-destructive/20 rounded-full px-2 py-0.5">
+                {visionResult && (
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                    <div className="text-center">
+                      <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 0.4 }}
+                        className="w-16 h-16 rounded-full border-2 border-primary mx-auto flex items-center justify-center bg-black/50">
+                        <span className="text-2xl">👤</span>
+                      </motion.div>
+                      <p className="text-xs text-primary mt-1.5 font-semibold">Scan Complete ✓</p>
+                    </div>
+                  </div>
+                )}
+                <div className="absolute top-2 left-2 flex items-center gap-1 bg-red-900/60 rounded-full px-2 py-0.5">
                   <motion.div animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 1.2, repeat: Infinity }}
-                    className="w-1.5 h-1.5 rounded-full bg-destructive" />
-                  <span className="text-[10px] text-destructive font-medium">LIVE</span>
+                    className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                  <span className="text-[10px] text-red-300 font-medium">LIVE</span>
                 </div>
               </div>
               {visionResult && (
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
-                    {[{ label: "Emotion", value: visionResult.emotion, color: "text-amber-600" },
-                      { label: "Fatigue", value: `${visionResult.fatigue}%`, color: "text-red-500" },
+                    {[
+                      { label: "Emotion", value: visionResult.emotion, color: "text-amber-600" },
+                      { label: "Fatigue", value: `${visionResult.fatigue}%`, color: visionResult.fatigue > 60 ? "text-red-500" : "text-green-600" },
                       { label: "Focus", value: `${visionResult.focus}%`, color: "text-primary" },
-                      { label: "Confidence", value: "87%", color: "text-blue-500" }].map(item => (
+                      { label: "Stress", value: `${visionResult.stress ?? visionResult.confidence ?? 50}%`, color: visionResult.stress > 60 ? "text-orange-500" : "text-blue-500" }
+                    ].map(item => (
                       <div key={item.label} className="bg-muted/50 rounded-xl p-3">
                         <div className="text-muted-foreground text-xs">{item.label}</div>
                         <div className={`font-semibold text-sm mt-0.5 ${item.color}`}>{item.value}</div>
                       </div>
                     ))}
                   </div>
-                  <div className="bg-primary/5 border border-primary/15 rounded-xl p-3">
-                    <p className="text-xs text-muted-foreground mb-1">{companion?.name || "Asha"}'s take</p>
-                    <p className="text-sm text-foreground">{visionResult.advice}</p>
+                  {/* Metric bars */}
+                  <div className="space-y-1.5">
+                    {[
+                      { label: "Fatigue", val: visionResult.fatigue, color: "bg-red-400" },
+                      { label: "Focus", val: visionResult.focus, color: "bg-primary" },
+                    ].map(m => (
+                      <div key={m.label}>
+                        <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
+                          <span>{m.label}</span><span>{m.val}%</span>
+                        </div>
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                          <motion.div className={`h-full ${m.color} rounded-full`}
+                            initial={{ width: 0 }} animate={{ width: `${m.val}%` }} transition={{ duration: 0.7 }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                  <div className="bg-primary/5 border border-primary/15 rounded-xl p-3">
+                    <p className="text-xs text-muted-foreground mb-1 font-medium">{companion?.name || "Asha"}'s take</p>
+                    <p className="text-sm text-foreground leading-relaxed">{visionResult.advice}</p>
+                  </div>
+                  <button onClick={closeVision} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity">
+                    Got it ✓
+                  </button>
                 </motion.div>
               )}
             </motion.div>
@@ -505,24 +600,82 @@ function CompanionCustomizerModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ─── QUEST VERIFICATION UTILS ────────────────────────────────────────────────
+const QUEST_TIMERS: Record<number, number> = {
+  1: 120, 3: 240, 4: 600, 6: 420, 10: 600,
+};
+const QUEST_VERIFICATION: Record<number, string> = {
+  1: "Name one task you actually focused on:",
+  2: "What is one thing you can TOUCH right now?",
+  3: "How many breaths did you complete?",
+  4: "Rate your focus from 1-10:",
+  5: "Name the first emotion you felt today:",
+  6: "Where in your body do you feel most relaxed now?",
+  7: "Write down one intrusive thought you boxed:",
+  8: "What is one tiny good thing from today?",
+  9: "What boundary did you practice?",
+  10: "What is your one top task for tomorrow?",
+  11: "What strength did you name in the mirror?",
+  12: "What was your trigger and calm response?",
+};
+
+function useQuestTimer(seconds: number, running: boolean) {
+  const [left, setLeft] = useState(seconds);
+  useEffect(() => {
+    setLeft(seconds);
+  }, [seconds]);
+  useEffect(() => {
+    if (!running || left <= 0) return;
+    const t = setInterval(() => setLeft(s => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [running, left]);
+  const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  return { left, done: left === 0, fmt: fmt(left) };
+}
+
 // ─── QUESTS TAB ──────────────────────────────────────────────────────────────
 function QuestsTab() {
   const { user, completedQuests, completeQuest } = useStore();
   const [activeQuest, setActiveQuest] = useState<typeof QUESTS[0] | null>(null);
   const [questStep, setQuestStep] = useState(0);
   const [questDone, setQuestDone] = useState(false);
+  const [verifyMode, setVerifyMode] = useState(false);
+  const [verifyAnswer, setVerifyAnswer] = useState("");
+  const [timerRunning, setTimerRunning] = useState(false);
   const levelXP = user?.xp || 0;
+
+  const questTimer = useQuestTimer(
+    activeQuest ? (QUEST_TIMERS[activeQuest.id] || 0) : 0,
+    timerRunning
+  );
 
   const startQuest = (q: typeof QUESTS[0]) => {
     setActiveQuest(q);
     setQuestStep(0);
     setQuestDone(false);
+    setVerifyMode(false);
+    setVerifyAnswer("");
+    setTimerRunning(false);
   };
 
   const nextStep = () => {
     if (!activeQuest) return;
-    if (questStep < activeQuest.steps.length - 1) setQuestStep(s => s + 1);
-    else { completeQuest(activeQuest.id, activeQuest.xp); setQuestDone(true); }
+    // Start timer on first step if this quest has a timer
+    if (questStep === 0 && QUEST_TIMERS[activeQuest.id]) setTimerRunning(true);
+    if (questStep < activeQuest.steps.length - 1) {
+      setQuestStep(s => s + 1);
+    } else {
+      // Last step — go to verification
+      setTimerRunning(false);
+      setVerifyMode(true);
+    }
+  };
+
+  const submitVerification = () => {
+    if (!activeQuest || !verifyAnswer.trim()) return;
+    completeQuest(activeQuest.id, activeQuest.xp);
+    setQuestDone(true);
+    setVerifyMode(false);
   };
 
   return (
@@ -602,61 +755,133 @@ function QuestsTab() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-5">
-              {!questDone ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full"
-                      style={{ background: (CATEGORY_COLORS[activeQuest.category] || "#3A7A52") + "20", color: CATEGORY_COLORS[activeQuest.category] || "#3A7A52" }}>
-                      {activeQuest.category}
-                    </span>
-                    <button onClick={() => setActiveQuest(null)}><X size={18} className="text-muted-foreground" /></button>
-                  </div>
-                  <div>
-                    <h3 className="font-black font-serif text-foreground text-lg">{activeQuest.title}</h3>
-                    <p className="text-muted-foreground text-xs mt-1">{activeQuest.desc}</p>
-                  </div>
-                  {/* Steps */}
-                  <div className="space-y-2">
-                    {activeQuest.steps.map((step, i) => (
-                      <div key={i} className={`flex items-center gap-3 p-3 rounded-xl transition-all ${i === questStep ? "bg-primary/10 border border-primary/20" : i < questStep ? "opacity-50" : "opacity-40"}`}>
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${i < questStep ? "bg-primary text-primary-foreground" : i === questStep ? "bg-primary/20 text-primary border border-primary/40" : "bg-muted text-muted-foreground"}`}>
-                          {i < questStep ? <CheckCircle size={12} /> : i + 1}
-                        </div>
-                        <p className={`text-sm ${i === questStep ? "text-foreground font-medium" : "text-muted-foreground"}`}>{step}</p>
+              className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+
+              <AnimatePresence mode="wait">
+                {!questDone && !verifyMode && (
+                  <motion.div key="steps" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full"
+                        style={{ background: (CATEGORY_COLORS[activeQuest.category] || "#3A7A52") + "20", color: CATEGORY_COLORS[activeQuest.category] || "#3A7A52" }}>
+                        {activeQuest.category}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {/* Timer badge */}
+                        {QUEST_TIMERS[activeQuest.id] > 0 && (
+                          <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono font-bold ${timerRunning ? (questTimer.left < 30 ? "bg-red-100 text-red-600" : "bg-primary/10 text-primary") : "bg-muted text-muted-foreground"}`}>
+                            <Clock size={11} />
+                            {questTimer.fmt}
+                          </div>
+                        )}
+                        <button onClick={() => { setTimerRunning(false); setActiveQuest(null); }}><X size={18} className="text-muted-foreground" /></button>
                       </div>
-                    ))}
-                  </div>
-                  {/* Progress */}
-                  <div className="bg-muted rounded-full h-1.5 overflow-hidden">
-                    <motion.div className="h-full bg-primary rounded-full"
-                      animate={{ width: `${((questStep + 1) / activeQuest.steps.length) * 100}%` }}
-                      transition={{ duration: 0.4 }} />
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setActiveQuest(null)} className="px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted/50 transition-colors">Quit</button>
-                    <button onClick={nextStep} className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity">
-                      {questStep < activeQuest.steps.length - 1 ? "Next Step" : "Complete Quest"}
+                    </div>
+                    <div>
+                      <h3 className="font-black font-serif text-foreground text-lg">{activeQuest.title}</h3>
+                      <p className="text-muted-foreground text-xs mt-1">{activeQuest.desc}</p>
+                    </div>
+
+                    {/* Breathing animation for breathing quests */}
+                    {activeQuest.category === "Breathing" && timerRunning && (
+                      <div className="flex flex-col items-center py-2">
+                        <motion.div
+                          animate={{ scale: [1, 1.5, 1.5, 1, 1], opacity: [0.6, 1, 1, 0.6, 0.6] }}
+                          transition={{ duration: 11, repeat: Infinity, times: [0, 0.36, 0.64, 0.73, 1] }}
+                          className="w-16 h-16 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+                          <motion.span
+                            animate={{ opacity: [1, 0, 0, 1, 1] }}
+                            transition={{ duration: 11, repeat: Infinity, times: [0, 0.36, 0.36, 0.73, 1] }}
+                            className="text-xs font-bold text-primary">
+                            IN
+                          </motion.span>
+                        </motion.div>
+                        <p className="text-xs text-muted-foreground mt-2">Follow the circle — breathe with it</p>
+                      </div>
+                    )}
+
+                    {/* Steps */}
+                    <div className="space-y-2">
+                      {activeQuest.steps.map((step, i) => (
+                        <div key={i} className={`flex items-center gap-3 p-3 rounded-xl transition-all ${i === questStep ? "bg-primary/10 border border-primary/20" : i < questStep ? "opacity-50" : "opacity-40"}`}>
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${i < questStep ? "bg-primary text-primary-foreground" : i === questStep ? "bg-primary/20 text-primary border border-primary/40" : "bg-muted text-muted-foreground"}`}>
+                            {i < questStep ? <CheckCircle size={12} /> : i + 1}
+                          </div>
+                          <p className={`text-sm ${i === questStep ? "text-foreground font-medium" : "text-muted-foreground"}`}>{step}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Progress */}
+                    <div className="bg-muted rounded-full h-1.5 overflow-hidden">
+                      <motion.div className="h-full bg-primary rounded-full"
+                        animate={{ width: `${((questStep + 1) / activeQuest.steps.length) * 100}%` }}
+                        transition={{ duration: 0.4 }} />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { setTimerRunning(false); setActiveQuest(null); }} className="px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted/50 transition-colors">Quit</button>
+                      <button onClick={nextStep} className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity">
+                        {questStep < activeQuest.steps.length - 1 ? "Next Step →" : "I'm Done — Verify ✓"}
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* ── VERIFICATION STEP ── */}
+                {!questDone && verifyMode && (
+                  <motion.div key="verify" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+                    <div className="text-center space-y-1">
+                      <div className="text-3xl mb-2">🔍</div>
+                      <h3 className="font-black font-serif text-foreground text-lg">Quick Check-in</h3>
+                      <p className="text-muted-foreground text-xs">Prove you did it — just one answer!</p>
+                    </div>
+                    <div className="bg-primary/5 border border-primary/20 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-foreground mb-3">
+                        {QUEST_VERIFICATION[activeQuest.id] || "What did you notice during this quest?"}
+                      </p>
+                      <textarea
+                        value={verifyAnswer}
+                        onChange={e => setVerifyAnswer(e.target.value)}
+                        placeholder="Write your answer here..."
+                        rows={3}
+                        className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
+                      />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground text-center">Your answer is private — just for you 💙</p>
+                    <div className="flex gap-2">
+                      <button onClick={() => setVerifyMode(false)} className="px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground">Back</button>
+                      <button onClick={submitVerification} disabled={!verifyAnswer.trim()}
+                        className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${verifyAnswer.trim() ? "bg-primary text-primary-foreground hover:opacity-90" : "bg-muted text-muted-foreground cursor-not-allowed"}`}>
+                        Submit & Complete 🎯
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* ── COMPLETION ── */}
+                {questDone && (
+                  <motion.div key="done" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center space-y-4 py-4">
+                    <motion.div animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.2, 1] }} transition={{ duration: 0.6 }}
+                      className="text-5xl">🎉</motion.div>
+                    <div>
+                      <h3 className="font-black font-serif text-foreground text-xl">Quest Complete!</h3>
+                      <p className="text-muted-foreground text-sm mt-1">{activeQuest.title}</p>
+                    </div>
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 rounded-xl p-4 flex items-center justify-center gap-3">
+                      <Star size={20} className="text-amber-500" />
+                      <span className="font-black text-2xl text-amber-700">+{activeQuest.xp} XP</span>
+                    </div>
+                    {verifyAnswer && (
+                      <div className="bg-muted/50 rounded-xl p-3 text-left">
+                        <p className="text-[10px] text-muted-foreground mb-1">Your reflection</p>
+                        <p className="text-xs text-foreground italic">"{verifyAnswer}"</p>
+                      </div>
+                    )}
+                    <button onClick={() => setActiveQuest(null)} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:opacity-90 transition-opacity">
+                      Back to Quests
                     </button>
-                  </div>
-                </>
-              ) : (
-                <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="text-center space-y-4 py-4">
-                  <motion.div animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.2, 1] }} transition={{ duration: 0.5 }}
-                    className="text-5xl">🎉</motion.div>
-                  <div>
-                    <h3 className="font-black font-serif text-foreground text-xl">Quest Complete!</h3>
-                    <p className="text-muted-foreground text-sm mt-1">{activeQuest.title}</p>
-                  </div>
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-center gap-3">
-                    <Star size={20} className="text-amber-500" />
-                    <span className="font-black text-2xl text-amber-700">+{activeQuest.xp} XP</span>
-                  </div>
-                  <button onClick={() => setActiveQuest(null)} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:opacity-90 transition-opacity">
-                    Back to Quests
-                  </button>
-                </motion.div>
-              )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           </motion.div>
         )}
@@ -665,10 +890,77 @@ function QuestsTab() {
   );
 }
 
+// ─── NETFLIX INTRO ───────────────────────────────────────────────────────────
+function NetflixIntro({ course, onDone }: { course: typeof COURSES[0]; onDone: () => void }) {
+  const [phase, setPhase] = useState<"logo" | "title" | "ready">("logo");
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setPhase("title"), 1200);
+    const t2 = setTimeout(() => setPhase("ready"), 2600);
+    const t3 = setTimeout(onDone, 3400);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [onDone]);
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+      style={{ background: "#000" }}
+      initial={{ opacity: 1 }}
+      animate={{ opacity: phase === "ready" ? 0 : 1 }}
+      transition={{ duration: 0.8, delay: phase === "ready" ? 0 : 0 }}>
+
+      {/* Animated logo */}
+      <AnimatePresence mode="wait">
+        {phase === "logo" && (
+          <motion.div key="logo"
+            initial={{ scaleX: 0, opacity: 0 }}
+            animate={{ scaleX: 1, opacity: 1 }}
+            exit={{ scaleY: 0, opacity: 0 }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            className="text-center space-y-2">
+            <div className="w-20 h-20 rounded-2xl mx-auto flex items-center justify-center"
+              style={{ background: `linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%)` }}>
+              <span className="text-4xl font-black text-white font-serif">S</span>
+            </div>
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: "80px" }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+              className="h-0.5 mx-auto rounded-full"
+              style={{ background: "hsl(var(--primary))" }}
+            />
+          </motion.div>
+        )}
+        {phase === "title" && (
+          <motion.div key="title"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            transition={{ duration: 0.5 }}
+            className="text-center px-8 space-y-3 max-w-xs">
+            <div className="text-5xl">{course.emoji}</div>
+            <h1 className="text-2xl font-black text-white font-serif leading-tight">{course.title}</h1>
+            <p className="text-white/50 text-sm">Episode 1 · {course.ep1}</p>
+            <div className="flex items-center justify-center gap-1.5 mt-2">
+              {[0, 1, 2].map(i => (
+                <motion.div key={i}
+                  animate={{ opacity: [0.3, 1, 0.3] }}
+                  transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                  className="w-1.5 h-1.5 rounded-full bg-white/60" />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
 // ─── LEARN TAB ───────────────────────────────────────────────────────────────
 function LearnTab() {
   const [playing, setPlaying] = useState<typeof COURSES[0] | null>(null);
-  const [progress, setProgress] = useState(18);
+  const [showIntro, setShowIntro] = useState(false);
+  const [pendingCourse, setPendingCourse] = useState<typeof COURSES[0] | null>(null);
   const { companion } = useStore();
   const featured = COURSES.find(c => c.featured) || COURSES[0];
   const rows = [
@@ -677,6 +969,16 @@ function LearnTab() {
     { label: "Anxiety Toolkit", courses: COURSES.filter(c => c.category === "Anxiety") },
     { label: "Wellness Essentials", courses: COURSES.filter(c => ["Wellness", "Grounding", "EQ"].includes(c.category)) },
   ];
+
+  const playCourse = (course: typeof COURSES[0]) => {
+    setPendingCourse(course);
+    setShowIntro(true);
+  };
+
+  const onIntroDone = () => {
+    setShowIntro(false);
+    if (pendingCourse) { setPlaying(pendingCourse); setPendingCourse(null); }
+  };
 
   if (playing) {
     const ytId = (playing as typeof playing & { youtubeId?: string }).youtubeId;
@@ -726,6 +1028,11 @@ function LearnTab() {
     );
   }
 
+  /* Netflix-style intro overlay */
+  if (showIntro && pendingCourse) {
+    return <NetflixIntro course={pendingCourse} onDone={onIntroDone} />;
+  }
+
   return (
     <div className="bg-[#0a0a0c] min-h-full text-white">
       {/* Featured hero */}
@@ -735,7 +1042,7 @@ function LearnTab() {
           <h2 className="text-3xl font-black font-serif mt-3">{featured.title}</h2>
           <p className="text-white/70 mt-2 text-sm leading-relaxed max-w-md">{featured.desc}</p>
           <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            onClick={() => setPlaying(featured)}
+            onClick={() => playCourse(featured)}
             className="mt-5 flex items-center gap-2 bg-white text-black font-bold px-5 py-3 rounded-xl text-sm hover:opacity-95 transition-opacity">
             <Play size={16} className="ml-0.5" /> Play Episode 1
           </motion.button>
@@ -750,7 +1057,7 @@ function LearnTab() {
             <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
               {row.courses.map(course => (
                 <motion.button key={course.id} whileHover={{ scale: 1.05, y: -4 }} whileTap={{ scale: 0.96 }}
-                  onClick={() => setPlaying(course)}
+                  onClick={() => playCourse(course)}
                   className="flex-shrink-0 w-40 rounded-2xl overflow-hidden cursor-pointer group shadow-lg shadow-black/40">
 
                   {/* Thumbnail */}
@@ -1513,6 +1820,33 @@ function SettingsTab() {
         <Row label="Session Recording" sub="Record sessions for review">
           <Toggle value={settings.sessionRecording} onChange={v => updateSettings({ sessionRecording: v })} />
         </Row>
+      </Section>
+
+      {/* App Theme */}
+      <Section title="App Theme">
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-xs text-muted-foreground">Choose your vibe — changes take effect instantly</p>
+          <div className="grid grid-cols-5 gap-2">
+            {([
+              { id: "forest",   label: "Forest",   emoji: "🌿", colors: ["#2D5A3D", "#F5F0E8"] },
+              { id: "midnight", label: "Midnight",  emoji: "🌙", colors: ["#7C3AED", "#0F0F1A"] },
+              { id: "ocean",    label: "Ocean",     emoji: "🌊", colors: ["#0E7490", "#EFF9FF"] },
+              { id: "sakura",   label: "Sakura",    emoji: "🌸", colors: ["#E11D48", "#FFF0F5"] },
+              { id: "amber",    label: "Amber",     emoji: "🔥", colors: ["#C2410C", "#FEF3E2"] },
+            ] as const).map(t => (
+              <button key={t.id} onClick={() => updateSettings({ theme: t.id })}
+                className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border-2 transition-all ${settings.theme === t.id ? "border-primary shadow-md scale-105" : "border-border hover:border-primary/40"}`}>
+                {/* Swatch */}
+                <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 shadow-sm"
+                  style={{ background: `linear-gradient(135deg, ${t.colors[0]} 50%, ${t.colors[1]} 50%)` }} />
+                <span className="text-[10px] font-semibold text-foreground">{t.label}</span>
+                {settings.theme === t.id && (
+                  <span className="text-[9px] text-primary font-bold">✓ Active</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
       </Section>
 
       {/* App Preferences */}

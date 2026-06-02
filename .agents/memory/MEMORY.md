@@ -1,0 +1,1 @@
+- [SoulSync project setup](soulsync-setup.md) — monorepo with soulsync frontend (port 19766) + api-server (port 8080), vite proxies /api to api-server

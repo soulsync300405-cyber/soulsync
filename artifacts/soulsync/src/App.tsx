@@ -1,5 +1,5 @@
 import { AnimatePresence } from "framer-motion";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Landing } from "@/pages/Landing";
 import { Onboarding } from "@/pages/Onboarding";
 import { StudentApp } from "@/pages/StudentApp";
@@ -17,16 +17,27 @@ type Screen =
   | "psych-dashboard";
 
 function AppInner() {
-  const { user, companion, setUser, setCompanion } = useStore();
+  const { user, companion, setUser, setCompanion, settings } = useStore();
   const [screen, setScreen] = useState<Screen>(() => {
     if (user && companion) return "student";
     return "landing";
   });
   const [psychLicenseId, setPsychLicenseId] = useState("");
 
-  // Load from DB on mount, sync changes back to DB
   useDbLoad();
   useDbSync();
+
+  // Apply theme class to root element
+  useEffect(() => {
+    const root = document.documentElement;
+    const themes = ["theme-forest", "theme-midnight", "theme-ocean", "theme-sakura", "theme-amber", "dark"];
+    root.classList.remove(...themes);
+    if (settings.theme === "midnight") {
+      root.classList.add("dark", "theme-midnight");
+    } else {
+      root.classList.add(`theme-${settings.theme}`);
+    }
+  }, [settings.theme]);
 
   const handleSelectRole = (role: "student" | "psych") => {
     if (role === "student") {

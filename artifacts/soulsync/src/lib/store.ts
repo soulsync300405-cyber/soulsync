@@ -21,8 +21,10 @@ export type UserProfile = {
   sessions: number;
 };
 
+export type AppTheme = 'forest' | 'midnight' | 'ocean' | 'sakura' | 'amber';
+
 export type Settings = {
-  theme: 'light' | 'dark';
+  theme: AppTheme;
   notifications: boolean;
   dailyReminder: string;
   weeklyReport: boolean;
@@ -77,7 +79,7 @@ export const useStore = create<StoreState>()(
       companion: null,
       completedQuests: [],
       settings: {
-        theme: 'light',
+        theme: 'forest',
         notifications: true,
         dailyReminder: '09:00',
         weeklyReport: true,
