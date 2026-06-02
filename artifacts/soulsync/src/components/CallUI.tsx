@@ -120,14 +120,19 @@ export function CallUI({ type, companion, psychName, onEnd }: CallUIProps) {
   const roomId = `psych-${(psychName || "asha").toLowerCase().replace(/\s+/g, "-")}-room`;
   const webrtc = useWebRTC(roomId, type === "psychologist" ? local.stream : null);
 
+  // Capture frames first so we can pass a getter to the voice hook
+  const lastFrame = useFrameCapture(local.stream, phase === "active" && type === "ai");
+  const frameRef = useRef<string | null>(null);
+  frameRef.current = lastFrame;
+
   const aiCall = useAIVoiceCall(
     companion?.name || "Asha",
     companion?.voiceStyle,
     companion?.language,
+    () => frameRef.current,
   );
 
   const duration = useDuration(phase === "active");
-  const _frame = useFrameCapture(local.stream, phase === "active" && type === "ai");
 
   // Wire local stream → local video element
   useEffect(() => {

@@ -6,21 +6,20 @@ const hasSpeech = typeof window !== "undefined" && "speechSynthesis" in window;
 const hasSR = typeof window !== "undefined" &&
   ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 
-// ── Stream /api/voice-chat and return the full response text ─────────────────
+// ── Stream /api/video-chat and return the full spoken response ────────────────
 async function getAIReply(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   companionName: string,
   language?: string,
+  frame?: string | null,
 ): Promise<string> {
-  const resp = await fetch("/api/voice-chat", {
+  const resp = await fetch("/api/video-chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, companionName, language }),
+    body: JSON.stringify({ messages, companionName, language, frame: frame ?? null }),
   });
 
-  if (!resp.ok || !resp.body) {
-    throw new Error(`voice-chat ${resp.status}`);
-  }
+  if (!resp.ok || !resp.body) throw new Error(`video-chat ${resp.status}`);
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
@@ -47,6 +46,7 @@ export function useAIVoiceCall(
   companionName: string,
   _voiceStyle?: string,
   language?: string,
+  getFrame?: () => string | null,
 ) {
   const [callState, setCallState] = useState<AICallState>("idle");
   const [transcript, setTranscript] = useState("");
@@ -69,11 +69,8 @@ export function useAIVoiceCall(
     setAshaText(text);
 
     if (!hasSpeech) {
-      const delay = Math.min(text.length * 55, 7000);
-      setTimeout(() => {
-        setCallState("listening");
-        onDone?.();
-      }, delay);
+      const delay = Math.min(text.length * 55, 8000);
+      setTimeout(() => { setCallState("listening"); onDone?.(); }, delay);
       return;
     }
 
@@ -97,7 +94,7 @@ export function useAIVoiceCall(
     window.speechSynthesis.speak(utt);
   }, [language]);
 
-  // ── Start listening loop ─────────────────────────────────────────────────
+  // ── Listening loop ────────────────────────────────────────────────────────
   const startListening = useCallback(() => {
     if (!activeRef.current) return;
 
@@ -134,14 +131,14 @@ export function useAIVoiceCall(
       updateTranscript("");
 
       if (said.length < 2) {
-        // Nothing heard — keep listening
         setTimeout(startListening, 500);
         return;
       }
 
-      // Add user turn to history
-      historyRef.current.push({ role: "user", content: said });
+      // Snapshot frame at this moment
+      const frame = getFrame?.() ?? null;
 
+      historyRef.current.push({ role: "user", content: said });
       setCallState("thinking");
 
       try {
@@ -149,11 +146,11 @@ export function useAIVoiceCall(
           historyRef.current,
           companionName,
           language,
+          frame,
         );
 
         if (!activeRef.current) return;
 
-        // Add assistant turn to history (keep last 10 turns to avoid huge payloads)
         historyRef.current.push({ role: "assistant", content: reply });
         if (historyRef.current.length > 20) {
           historyRef.current = historyRef.current.slice(-20);
@@ -163,7 +160,7 @@ export function useAIVoiceCall(
           if (activeRef.current) setTimeout(startListening, 600);
         });
       } catch (err: any) {
-        console.error("voice-chat error:", err);
+        console.error("video-chat error:", err);
         if (!activeRef.current) return;
         const fallback = "Yaar, thodi si connection problem aa gayi. Dobara bolna?";
         speak(fallback, () => {
@@ -174,22 +171,27 @@ export function useAIVoiceCall(
 
     setCallState("listening");
     try { recognition.start(); } catch (_) {}
-  }, [companionName, language, speak]);
+  }, [companionName, language, getFrame, speak]);
 
-  // ── Start call ───────────────────────────────────────────────────────────
+  // ── Start call ────────────────────────────────────────────────────────────
   const startCall = useCallback(() => {
     activeRef.current = true;
     setError(null);
     updateTranscript("");
     historyRef.current = [];
 
-    const greeting = `Heyy! Main ${companionName} bol rahi hoon. Aaj kaisa feel ho raha hai? Main poori tarah yahan hoon tumhare liye.`;
+    // Greet with a visual observation if camera is available
+    const frame = getFrame?.();
+    const greeting = frame
+      ? `Heyy! Main ${companionName} hoon, aur main tumhe dekh sakti hoon! Aaj kaisa feel ho raha hai? Main poori tarah tumhare saath hoon.`
+      : `Heyy! Main ${companionName} bol rahi hoon. Aaj kaisa feel ho raha hai? Main poori tarah yahan hoon tumhare liye.`;
+
     speak(greeting, () => {
       if (activeRef.current) setTimeout(startListening, 600);
     });
-  }, [companionName, speak, startListening]);
+  }, [companionName, getFrame, speak, startListening]);
 
-  // ── End call ─────────────────────────────────────────────────────────────
+  // ── Stop call ─────────────────────────────────────────────────────────────
   const stopCall = useCallback(() => {
     activeRef.current = false;
     try { recognitionRef.current?.abort(); } catch (_) {}
