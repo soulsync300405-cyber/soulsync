@@ -73,9 +73,12 @@ export function MusicPlayer() {
           />
         )}
 
-        <button
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setExpanded(e => !e)}
-          className="relative w-full flex items-center gap-3 px-4 py-2.5">
+          onKeyDown={e => (e.key === "Enter" || e.key === " ") && setExpanded(x => !x)}
+          className="relative w-full flex items-center gap-3 px-4 py-2.5 cursor-pointer">
 
           {/* Album disc */}
           <motion.div
@@ -122,7 +125,7 @@ export function MusicPlayer() {
               ? <ChevronDown size={13} className="text-white/70" />
               : <ChevronUp size={13} className="text-white/70" />}
           </div>
-        </button>
+        </div>
 
         {/* Mini progress strip at bottom */}
         <div className="h-0.5 bg-white/20">
