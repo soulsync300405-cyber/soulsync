@@ -1,0 +1,19 @@
+Please execute a comprehensive update to my backend codebase to implement deep conversational capabilities, voice optimization, and an adaptive self-learning memory system for my AI companion, Asha. 
+
+Make the following critical updates:
+
+1. GLOBAL MODEL UPGRADE:
+- Across all AI API calls (text and voice routes), ensure the model is strictly set to `"gemini-3.5-flash"`. Do not use older deprecated models like gemini-pro.
+
+2. TEXT CHAT ENHANCEMENT (`artifacts/api-server/src/routes/chat.ts`):
+- Update `maxOutputTokens` to `1000`.
+- Update the System Prompt: Remove any "short 2-3 sentences" restrictions. Instruct the AI: "You are Asha, an empathetic peer-support companion. Write naturally in a friendly Hinglish tone. You are highly encouraged to write long, deep, and highly detailed paragraphs to fully support the user. Match their energy. STRICTLY NO formal academic jargon, NO slide references, and NO robotic safety disclaimers. Just be a genuine friend."
+
+3. VOICE / CALL FEATURE OPTIMIZATION (Locate the voice/call route, likely `voice.ts`, `call.ts`, or a WebSocket handler):
+- Update `maxOutputTokens` to `800` to allow the AI to yap and talk at length.
+- Update the Voice System Prompt: "You are speaking on a real-time phone call. Talk extensively, yap, and give detailed verbal responses. Use natural conversational fillers (Hmm, Acha, Haan yaar). STRICTLY NO markdown, no asterisks (*), and no emojis, as this breaks the Text-to-Speech engine. Use punctuation for breathing pauses. No academic jargon or slide references."
+
+4. ADAPTIVE SELF-LEARNING (Memory System Integration):
+- Database (Drizzle ORM): Update the user schema (e.g., `ss_users`) to include a new text column called `adaptive_memory` (default empty string). Run the necessary Drizzle push/migration command to update the live database.
+- Memory Injection: In both Text and Voice routes, fetch the user's `adaptive_memory` from the database before calling the Gemini API. Inject it dynamically into the system prompt: "Learned user context: {adaptive_memory}. Adapt your tone and response style exactly to these learned traits."
+- Memory Extraction (Background Logic): Add a lightweight function in the chat route that evaluates the user's latest messages. If the user explicitly states a preference (e.g., "talk casually", "I like long answers"), append this new fact to the `adaptive_memory` column in the database so the AI remembers it for future interactions. Do not block the main SSE stream while doing this.
