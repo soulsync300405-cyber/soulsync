@@ -68,7 +68,7 @@ router.post("/chat", async (req, res) => {
 
   try {
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash-latest",
+      model: "gemini-pro",
       systemInstruction: systemPrompt,
     });
 
