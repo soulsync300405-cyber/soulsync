@@ -72,10 +72,16 @@ router.post("/chat", async (req, res) => {
       systemInstruction: systemPrompt,
     });
 
-    const formattedHistory = messages.slice(0, -1).map((msg) => ({
-      role: msg.role === "assistant" ? "model" : "user",
-      parts: [{ text: msg.content }],
-    }));
+    const formattedHistory = messages
+      .slice(0, -1)
+      .map((msg) => ({
+        role: msg.role === "assistant" ? "model" : "user",
+        parts: [{ text: msg.content }],
+      }))
+      .filter((_, i, arr) => {
+        const firstUserIdx = arr.findIndex((m) => m.role === "user");
+        return i >= firstUserIdx;
+      });
 
     const lastMessage = messages[messages.length - 1];
     const userMessage = lastMessage.content;

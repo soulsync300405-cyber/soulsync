@@ -38,3 +38,5 @@ externalPort = 3000
 [userenv.development]
 
 [userenv.production]
+
+[nix]
