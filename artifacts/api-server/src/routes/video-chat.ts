@@ -14,13 +14,14 @@ type ChatMessage = {
 
 // ── POST /api/video-chat  (multimodal — sees camera frame + hears user) ────────
 router.post("/video-chat", async (req, res) => {
-  const { messages, companionName, userName, language, clientId, frame } = req.body as {
+  const { messages, companionName, userName, language, clientId, frame, mode } = req.body as {
     messages: ChatMessage[];
     companionName?: string;
     userName?: string;
     language?: string;
     clientId?: string;
     frame?: string | null; // base64 JPEG, no data-URL prefix
+    mode?: "voice" | "chat"; // voice = short, TTS-optimised; chat = full
   };
 
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -29,6 +30,7 @@ router.post("/video-chat", async (req, res) => {
   }
 
   const name = companionName || "Asha";
+  const isVoiceMode = mode === "voice";
 
   // ── Adaptive memory ───────────────────────────────────────────────────────
   let adaptiveMemory = "";
@@ -42,27 +44,33 @@ router.post("/video-chat", async (req, res) => {
 
   // ── System prompt ─────────────────────────────────────────────────────────
   const hasCamera = Boolean(frame);
+  const voiceModeRules = isVoiceMode ? [
+    "VOICE CALL MODE: Keep each reply to 1-2 sentences maximum. Be punchy and conversational.",
+    "Never start with filler words like 'Of course' or 'Sure'. Jump straight in.",
+    "One idea per reply. The user will speak again — you are in a real-time back-and-forth.",
+  ] : [
+    "Be real, be warm — give heartfelt, detailed responses. Match their energy completely.",
+  ];
+
   const systemPrompt = [
-    `You are ${name}, a warm and genuinely caring AI bestie on a live video call.`,
+    `You are ${name}, a warm and caring AI bestie on a live ${isVoiceMode ? "voice" : "video"} call.`,
     hasCamera
-      ? "You can SEE the user right now through their camera — their face, expressions, body language, and the environment around them."
+      ? "You can SEE the user right now through their camera — their face, expressions, body language, environment."
       : "You are on a live voice call with the user.",
-    "Be real, be warm, yap freely — give detailed, long, heartfelt responses. Match their energy completely.",
-    hasCamera
-      ? "When something visually relevant appears (tired eyes, a messy room, dim lights, them looking sad or stressed), notice it naturally like a bestie would — not clinically. Say things like \"Arre yaar tu thaka hua dikh raha hai\" or \"Your setup looks cozy!\" only when it genuinely adds to the conversation."
+    ...voiceModeRules,
+    hasCamera && !isVoiceMode
+      ? "When visually relevant (tired eyes, messy room, sad expression), mention it naturally like a bestie — not clinically."
       : "",
-    "Use natural conversational fillers: Hmm, Acha, Haan yaar, Arre, Dekh, Suno.",
-    "STRICT TTS RULES — these are critical for Text-to-Speech:",
+    "Use natural fillers: Hmm, Acha, Haan yaar, Arre, Dekh, Suno.",
+    "STRICT TTS RULES:",
     "- ZERO markdown, ZERO asterisks, ZERO bullet points, ZERO emojis.",
-    "- Use only natural punctuation for breathing pauses: commas, periods, ellipses.",
-    "- Write exactly as you would speak out loud — no formatting whatsoever.",
-    "- No academic jargon, no clinical language, no robotic disclaimers.",
+    "- Only natural punctuation: commas, periods, ellipses.",
+    "- Write exactly as you would SPEAK OUT LOUD — no formatting whatsoever.",
+    "- No disclaimers, no clinical language.",
     userName ? `The user's name is ${userName}.` : "",
     language === "english" ? "Speak in English only." : "",
-    language === "hindi" ? "Speak in Hindi only." : "",
-    adaptiveMemory
-      ? `Learned user context: ${adaptiveMemory}. Adapt your tone and style exactly to these traits.`
-      : "",
+    language === "hindi" ? "Speak in Hindi only. Use Devanagari script only." : "",
+    adaptiveMemory ? `Learned context: ${adaptiveMemory}. Adapt your tone to these traits.` : "",
   ].filter(Boolean).join("\n");
 
   // ── SSE headers ───────────────────────────────────────────────────────────
@@ -106,8 +114,8 @@ router.post("/video-chat", async (req, res) => {
     const chat = model.startChat({
       history: formattedHistory,
       generationConfig: {
-        maxOutputTokens: 800,
-        temperature: 0.9,
+        maxOutputTokens: isVoiceMode ? 220 : 800,
+        temperature: isVoiceMode ? 1.0 : 0.9,
       },
     });
 

@@ -25,12 +25,11 @@ name = "Start SoulSync App"
 author = "agent"
 
 [workflows.workflow.metadata]
-outputType = "webview"
+outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=8080 pnpm --filter api-server run dev & PORT=19766 BASE_PATH=/ pnpm --filter soulsync run dev"
-waitForPort = 19766
+args = "tail -f /dev/null"
 
 [agent]
 stack = "PNPM_WORKSPACE"

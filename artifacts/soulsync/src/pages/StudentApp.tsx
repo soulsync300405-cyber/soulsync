@@ -243,17 +243,25 @@ function ChatTab() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: "user" }, audio: false });
       webcamStreamRef.current = stream;
       setWebcamReady(true);
-      // Give camera 1.5s to warm up, then capture
-      setTimeout(async () => {
+      // Wait for camera to warm up and video to have data, then capture
+      const captureFrame = async () => {
+        const video = webcamRef.current;
+        if (!video || !stream) return;
+        // Poll until video has a real frame (readyState >= 2 = HAVE_CURRENT_DATA)
+        let waited = 0;
+        while (video.readyState < 2 && waited < 4000) {
+          await new Promise(r => setTimeout(r, 100));
+          waited += 100;
+        }
         try {
-          const video = webcamRef.current;
-          if (!video || !stream) return;
           const canvas = document.createElement("canvas");
           canvas.width = 320; canvas.height = 240;
           const ctx = canvas.getContext("2d");
-          if (!ctx) return;
+          if (!ctx) throw new Error("no ctx");
           ctx.drawImage(video, 0, 0, 320, 240);
-          const frame = canvas.toDataURL("image/jpeg", 0.8);
+          const frame = canvas.toDataURL("image/jpeg", 0.85);
+          // Validate we got a real frame (not blank)
+          if (frame.length < 1000) throw new Error("blank frame");
           const resp = await fetch("/api/face-analyze", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -263,7 +271,7 @@ function ChatTab() {
             const data = await resp.json();
             setVisionResult(data);
           } else {
-            setVisionResult({ emotion: "Calm", fatigue: 30, focus: 65, confidence: 78, stress: 25, advice: "You look good! Keep going 💙" });
+            throw new Error("api error");
           }
         } catch {
           setVisionResult({ emotion: "Calm", fatigue: 30, focus: 65, confidence: 78, stress: 25, advice: "You look good! Keep going 💙" });
@@ -271,7 +279,8 @@ function ChatTab() {
         // Stop camera after capture
         webcamStreamRef.current?.getTracks().forEach(t => t.stop());
         webcamStreamRef.current = null;
-      }, 1800);
+      };
+      setTimeout(captureFrame, 1200);
     } catch {
       setShowVision(false);
       setWebcamReady(false);
@@ -642,6 +651,8 @@ function QuestsTab() {
   const [verifyMode, setVerifyMode] = useState(false);
   const [verifyAnswer, setVerifyAnswer] = useState("");
   const [timerRunning, setTimerRunning] = useState(false);
+  const [breathCount, setBreathCount] = useState(0);
+  const [lastTap, setLastTap] = useState(0);
   const levelXP = user?.xp || 0;
 
   const questTimer = useQuestTimer(
@@ -656,6 +667,17 @@ function QuestsTab() {
     setVerifyMode(false);
     setVerifyAnswer("");
     setTimerRunning(false);
+    setBreathCount(0);
+    setLastTap(0);
+  };
+
+  const tapBreath = () => {
+    const now = Date.now();
+    // Debounce: at least 2s between taps (no faster than 1 breath per 2s)
+    if (now - lastTap > 2000) {
+      setBreathCount(c => c + 1);
+      setLastTap(now);
+    }
   };
 
   const nextStep = () => {
@@ -781,21 +803,41 @@ function QuestsTab() {
                       <p className="text-muted-foreground text-xs mt-1">{activeQuest.desc}</p>
                     </div>
 
-                    {/* Breathing animation for breathing quests */}
+                    {/* Breathing animation + real-time breath counter */}
                     {activeQuest.category === "Breathing" && timerRunning && (
-                      <div className="flex flex-col items-center py-2">
-                        <motion.div
-                          animate={{ scale: [1, 1.5, 1.5, 1, 1], opacity: [0.6, 1, 1, 0.6, 0.6] }}
-                          transition={{ duration: 11, repeat: Infinity, times: [0, 0.36, 0.64, 0.73, 1] }}
-                          className="w-16 h-16 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+                      <div className="flex flex-col items-center gap-3 py-1">
+                        <div className="relative">
+                          {/* Animated breath circle */}
+                          <motion.div
+                            animate={{ scale: [1, 1.55, 1.55, 1, 1], opacity: [0.5, 1, 1, 0.5, 0.5] }}
+                            transition={{ duration: 11, repeat: Infinity, times: [0, 0.36, 0.64, 0.73, 1] }}
+                            className="w-20 h-20 rounded-full bg-primary/15 border-2 border-primary flex items-center justify-center">
+                            <motion.span
+                              animate={{ opacity: [1, 0, 0, 1, 1] }}
+                              transition={{ duration: 11, repeat: Infinity, times: [0, 0.36, 0.36, 0.73, 1] }}
+                              className="text-xs font-bold text-primary">IN</motion.span>
+                          </motion.div>
+                          {/* Breath count badge */}
+                          {breathCount > 0 && (
+                            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
+                              className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-primary text-primary-foreground text-[10px] font-black flex items-center justify-center shadow-md">
+                              {breathCount}
+                            </motion.div>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">Follow the circle — breathe with it</p>
+                        {/* Tap to count breaths */}
+                        <motion.button
+                          whileTap={{ scale: 0.93 }}
+                          onClick={tapBreath}
+                          className="flex items-center gap-2 px-5 py-2 rounded-xl bg-primary/10 border border-primary/25 text-primary text-xs font-semibold transition-all hover:bg-primary/20 active:bg-primary/30 select-none">
                           <motion.span
-                            animate={{ opacity: [1, 0, 0, 1, 1] }}
-                            transition={{ duration: 11, repeat: Infinity, times: [0, 0.36, 0.36, 0.73, 1] }}
-                            className="text-xs font-bold text-primary">
-                            IN
+                            animate={breathCount > 0 ? { scale: [1, 1.3, 1] } : {}}
+                            transition={{ duration: 0.3 }}>
+                            🫁
                           </motion.span>
-                        </motion.div>
-                        <p className="text-xs text-muted-foreground mt-2">Follow the circle — breathe with it</p>
+                          Tap each breath &nbsp;·&nbsp; <span className="font-black">{breathCount}</span>
+                        </motion.button>
                       </div>
                     )}
 
@@ -834,9 +876,21 @@ function QuestsTab() {
                       <h3 className="font-black font-serif text-foreground text-lg">Quick Check-in</h3>
                       <p className="text-muted-foreground text-xs">Prove you did it — just one answer!</p>
                     </div>
+                    {/* Show breath count for breathing quests */}
+                    {activeQuest.category === "Breathing" && breathCount > 0 && (
+                      <div className="flex items-center justify-center gap-3 py-2 px-4 bg-primary/8 border border-primary/20 rounded-xl">
+                        <span className="text-2xl">🫁</span>
+                        <div>
+                          <p className="text-sm font-bold text-primary">{breathCount} breaths counted</p>
+                          <p className="text-xs text-muted-foreground">Great job following the rhythm!</p>
+                        </div>
+                      </div>
+                    )}
                     <div className="bg-primary/5 border border-primary/20 rounded-xl p-4">
                       <p className="text-sm font-semibold text-foreground mb-3">
-                        {QUEST_VERIFICATION[activeQuest.id] || "What did you notice during this quest?"}
+                        {activeQuest.category === "Breathing" && breathCount > 0
+                          ? `You completed ${breathCount} breaths! ${QUEST_VERIFICATION[activeQuest.id] || "How do you feel now?"}`
+                          : (QUEST_VERIFICATION[activeQuest.id] || "What did you notice during this quest?")}
                       </p>
                       <textarea
                         value={verifyAnswer}

@@ -1,1 +1,3 @@
 - [SoulSync project setup](soulsync-setup.md) — monorepo with soulsync frontend (port 19766) + api-server (port 8080), vite proxies /api to api-server
+- [SoulSync TTS fix](soulsync-tts.md) — Hinglish TTS must use en-IN (not hi-IN); voices load async via voiceschanged; Chrome needs 10s keepalive.
+- [SoulSync port conflict](soulsync-ports.md) — "Start SoulSync App" must be tail -f /dev/null (no-op); artifact workflows handle both ports.
